@@ -220,7 +220,7 @@ class AppendEntriesMessage(BaseMessage):
 		self._leader_commit = 	message['leader_commit']
 		self._pre_append_proof = message['pre_append_proof']
 		self._append_proof = message['append_proof']
-		self._hash = message['hash_val']
+		self._hash_val = message['hash_val']
 		self._self_sign = message['self_sign']
 
 
@@ -234,7 +234,7 @@ class AppendEntriesMessage(BaseMessage):
 			'leader_commit': 	self._leader_commit,
 			'pre_append_proof': self._pre_append_proof,
 			'append_proof':     self._append_proof,
-			'hash_val':         self._hash,
+			'hash_val':         self._hash_val,
 			'self_sign':        self._self_sign    
 		})
 		return message

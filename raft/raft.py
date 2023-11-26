@@ -13,6 +13,7 @@ import base64
 import random
 import threading
 from queue import Queue, Empty
+from collections import namedtuple
 
 from Crypto.Hash import SHA256
 from Crypto.PublicKey import RSA
@@ -32,7 +33,7 @@ start_port = 5557
 SigInfo = namedtuple('SigInfo', ['sig', 'my_id'])
 
 class RaftNode(threading.Thread):
-    def __init__(self, config, name, role='follower', verbose=True):
+    def __init__(self, config, name, role='follower', verbose=False):
         threading.Thread.__init__(self) 
 
         # Generate keys
@@ -90,7 +91,8 @@ class RaftNode(threading.Thread):
         self.append_next_index = [None for _ in range(self.current_num_nodes)]         # Index to send to each node next for append. None means up to date
         self.append_match_index = [0 for _ in range(self.current_num_nodes)]           # Index of highest committed entry on each node
         self.heard_from = [0 for _ in range(self.current_num_nodes)]                   # Time last heard from each node. 
-        self.pre_append_sigs = set()
+        self.pre_append_sigs = [set() for i in range(5000)]
+        # self.pre_append_sigs = set()
         self.append_sigs = set()
         self.append_message = None
 
@@ -344,12 +346,12 @@ class RaftNode(threading.Thread):
                         ack_message.append(self_sign)
                         
                         # Else if the previous index and term match, append the entry and reply true
+                        # else:
+                        if (incoming_message.leader_commit > self.commit_index):
+                            self._append_entry(incoming_message.entries, commit=True, prev_index=incoming_message.prev_log_index)
                         else:
-                            if (incoming_message.leader_commit > self.commit_index):
-                                self._append_entry(incoming_message.entries, commit=True, prev_index=incoming_message.prev_log_index)
-                            else:
-                                self._append_entry(incoming_message.entries, commit=False, prev_index=incoming_message.prev_log_index)
-                            self._send_append_acknowledge(incoming_message.leader_id, True, self_sign)
+                            self._append_entry(incoming_message.entries, commit=False, prev_index=incoming_message.prev_log_index)
+                        self._send_append_acknowledge(incoming_message.leader_id, True, self_sign)
                             # self._send_append_acknowledge(incoming_message.leader_id, True)
                     
                     # Incoming message is a commit message
@@ -384,9 +386,10 @@ class RaftNode(threading.Thread):
             print(self._name + ': became candidate')
 
         # If you're a candidate, then this is a new term
-        self._increment_term()
+        # self._increment_term()
 
         # Request for nodes to vote for you
+        print(self._name + "req votes for term " + str(self.current_term))
         self._send_request_vote()
 
         # Vote for yorself
@@ -409,6 +412,7 @@ class RaftNode(threading.Thread):
                     # If it is a vote, then tally for or against you
                     if (incoming_message.type == MessageType.RequestVotes):
                         if (incoming_message.results.vote_granted):
+                            print("got vote")
                             votes_for_me += 1
                         total_votes += 1
 
@@ -425,7 +429,9 @@ class RaftNode(threading.Thread):
 
                     # If there's an election for someone else on a higher term, update your term, vote for them, and demote yourself
                     if (incoming_message.type == MessageType.RequestVotes):
-                        if (incoming_message.term > self.current_term):
+                        print("got request")
+                        if (incoming_message.term >= self.current_term):
+                            print("sending vote")
                             self._increment_term(incoming_message.term)
                             self._send_vote(incoming_message.sender)
                             self._set_current_role('follower')
@@ -468,8 +474,8 @@ class RaftNode(threading.Thread):
                         demote yourself. 
         ''' 
         
-        if(self.verbose):
-            print(self._name + ': became leader')
+        # if(self.verbose):
+        print(self._name + ': became leader')
 
         # First things first, send a heartbeat
         self._send_heartbeat()
@@ -519,7 +525,7 @@ class RaftNode(threading.Thread):
                     if (incoming_message.type == MessageType.PreAppendAcknowledge):
                         leader_msg =  json.dumps(self.pre_append_info)
                         if self.validate_sig(incoming_message.self_sign, leader_msg):
-                            self.pre_app_sigs.add(node.SigInfo(*incoming_message.self_sign))
+                            self.pre_append_sigs[incoming_message.prev_log_index].add(node.SigInfo(*incoming_message.self_sign))
                         sender_index = self._get_node_index(incoming_message.sender)
                         self.heard_from[sender_index] = time.time()
 
@@ -548,9 +554,9 @@ class RaftNode(threading.Thread):
                             log_lengths = [int(i) for i in self.pre_append_match_index if (i is not None)]
                             log_lengths.sort(reverse=True)
                             max_committable_index = 0
-                            if (self.pre_app_sigs >= self.quorum):
-                                pre_app_proof = list(self.pre_app_sigs)
-                                self.pre_app_sigs = set()
+                            if (self.pre_append_sigs[incoming_message.prev_log_index] >= self.quorum):
+                                pre_app_proof = list(self.pre_append_sigs)
+                                # self.pre_app_sigs[incoming_message.prev_log_index] = set()
                                 commit_hash = self.hash_obj(self.commits[-1])
                                 self.append_info = [MessageType.AppendEntries, *self.pre_append_info[1:4], commit_hash]
                                 self.append_sigs = {self.sign_message(json.dumps(self.append_info))}
@@ -574,7 +580,7 @@ class RaftNode(threading.Thread):
 
                             # If there's a new committable index, then send the commit
                             if (max_appendable_index > self.append_index):
-                                self._send_append_entries(self, index, term, append_message, receiver=None, pre_app_proof, append_proof, commit_hash)
+                                self._send_append_entries(self, index, term, append_message, pre_app_proof, append_proof, commit_hash, receiver=None)
                                     # self._broadcast_commmit_entries(max_appendable_index) -> change to send append entries
 
                     # Incoming message is an ack, update append_next_index and see if there's more log to send
@@ -868,6 +874,7 @@ class RaftNode(threading.Thread):
                 self._send_committal(index, self.all_ids[node])
 
     def _send_request_vote(self, receiver=None):
+        print("REQ VOTE")
         message = RequestVotesMessage(
             type_ =   MessageType.RequestVotes, 
             term =   self.current_term, 
@@ -881,6 +888,7 @@ class RaftNode(threading.Thread):
         self._send_message(message)
 
     def _send_vote(self, candidate, vote_granted=True):
+        print("SEND VOTE: " + str(vote_granted))
         message = RequestVotesMessage(
             type_ =   MessageType.RequestVotes, 
             term =   self.current_term,
@@ -914,6 +922,7 @@ class RaftNode(threading.Thread):
         self._send_message(message)
 
     def _send_pre_append_entries(self, index, term, entries, receiver=None):
+        print("SENDING PRE-APPEND")
         pre_app_hash = self.hash_obj(entries)
         message_to_sign = [MessageType.PreAppend, self.current_term, index, pre_app_hash]
         self_sign = self.sign_message(json.dumps(message_to_sign))
@@ -931,11 +940,12 @@ class RaftNode(threading.Thread):
             hash_val=pre_app_hash, 
             self_sign=self_sign
         )
-        self.pre_app_sigs = {self_sign}
+        self.pre_append_sigs[index] = {self_sign}
         self.pre_append_info = message_to_sign
         self._send_message(message)
 
-    def _send_append_entries(self, index, term, entries, receiver=None, pre_app_proof, append_proof, commit_hash):
+    def _send_append_entries(self, index, term, entries, pre_app_proof=None, append_proof=None, commit_hash=None, receiver=None):
+        print("SENDING APPEND")
         message = AppendEntriesMessage(
             type_ = MessageType.AppendEntries,
             term = self.current_term,
@@ -954,6 +964,7 @@ class RaftNode(threading.Thread):
         self._send_message(message)
     
     def _send_committal(self, index, receiver=None):
+        print("SENDING COMMIT")
         # message_to_sign = [MessageType.Commital, self.hash_obj()]
         # self_sign = self.sign_message(json.dumps(message_to_sign))
         message = AppendEntriesMessage(
@@ -985,6 +996,7 @@ class RaftNode(threading.Thread):
     #     self._send_message(message)
 
     def _send_pre_append_acknowledge(self, receiver, success, entry=None, self_sign=None):
+        print("SENDING PRE-APPEND ACK")
         message = AppendEntriesMessage(
             type_ = MessageType.PreAppendAcknowledgement,
             term = self.current_term,
@@ -1005,6 +1017,7 @@ class RaftNode(threading.Thread):
         self._send_message(message)
 
     def _send_append_acknowledge(self, receiver, success, entry=None, self_sign=None):
+        print("SENDING APPEND ACK")
         message = AppendEntriesMessage(
             type_ = MessageType.Acknowledge,
             term = self.current_term,
@@ -1025,6 +1038,7 @@ class RaftNode(threading.Thread):
         self._send_message(message)
 
     def _send_client_request(self, receiver, entry):
+        print("SENDING CLIENT REQ")
         message = AppendEntriesMessage(
             type_ = MessageType.ClientRequest,
             term = self.current_term,
@@ -1079,7 +1093,7 @@ def test_failures():
     # Pause about half of them, including the leader
     l = [n for n in s if (n.check_role() == 'leader')][0]
     l.pause()
-    num_to_kill = int(old_div(total_nodes, 2)) - 1
+    num_to_kill = int(old_div(total_nodes - 1, 3))
     for n in s:
         num_to_kill = num_to_kill - 1
         if num_to_kill == 0:
