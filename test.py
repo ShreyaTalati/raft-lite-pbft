@@ -3,29 +3,36 @@ import time
 from raft import RaftNode
 
 # Create the intercommunication json 
-ip_addr = "192.168.0.29"
+ip_addr = "127.0.0.1"
 comm_dict = {"node0": {"ip": ip_addr, "port": "5567"}, 
              "node1": {"ip": ip_addr, "port": "5566"}, 
-             "node2": {"ip": ip_addr, "port": "5565"}}
+             "node2": {"ip": ip_addr, "port": "5565"},
+             "node3": {"ip": ip_addr, "port": "5564"}}
 
 # Start a few nodes
 nodes = []
+print("Starting nodes:")
 for name, address in comm_dict.items():
     nodes.append(RaftNode(comm_dict, name))
     nodes[-1].start()
 
 # Let a leader emerge
-time.sleep(2)
+time.sleep(30)
 
 # Make some requests
+print("Making req:")
 for val in range(5):
     nodes[0].client_request({'val': val})
 time.sleep(5)
 
 # Check and see what the most recent entry is
+print("commit:")
 for n in nodes:
     print(n.check_committed_entry())
 
 # Stop all the nodes
+print("Stopping:")
 for n in nodes:
     n.stop()
+
+exit()

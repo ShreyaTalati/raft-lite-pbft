@@ -267,6 +267,7 @@ class RaftNode(threading.Thread):
 
                         # If leader has been resolved, check for any client requests
                         if (self.leader_id):
+                            print("Getting client REQ")
                             client_request = self._get_client_request()
                             if (client_request is not None):
                                 self._send_client_request(incoming_message.leader_id, client_request)
@@ -386,10 +387,13 @@ class RaftNode(threading.Thread):
             print(self._name + ': became candidate')
 
         # If you're a candidate, then this is a new term
-        # self._increment_term()
+        self._increment_term()
 
         # Request for nodes to vote for you
-        print(self._name + "req votes for term " + str(self.current_term))
+        if(self.verbose):
+            print(self._name + "req votes for term " + str(self.current_term))
+        # for node, index in enumerate(self.append_match_index):
+        #     self._send_request_vote(self.all_ids[node])
         self._send_request_vote()
 
         # Vote for yorself
@@ -403,8 +407,11 @@ class RaftNode(threading.Thread):
         time_election_going = time.time()
 
         while ((not self._terminate) and (self.check_role() == 'candidate')):
+            # print("IN WHILE")
             incoming_message = self._get_message()
             if (incoming_message is not None):
+                if(self.verbose):
+                    print("GOT MESSAGE")
 
                 # Handle responses to your election
                 if (incoming_message.direction == MessageDirection.Response):
@@ -412,15 +419,15 @@ class RaftNode(threading.Thread):
                     # If it is a vote, then tally for or against you
                     if (incoming_message.type == MessageType.RequestVotes):
                         if (incoming_message.results.vote_granted):
-                            print("got vote")
                             votes_for_me += 1
+                            print("got votes: " + str(votes_for_me))
                         total_votes += 1
 
                         #print(self._name + ": votes for me " + str(votes_for_me))
                         #print(self._name + ": total votes " + str(total_votes))
                             
                         # If you have a majority, promote yourself
-                        if ((votes_for_me > self.quorum) or (self.current_num_nodes == 1)):
+                        if ((votes_for_me >= self.quorum) or (self.current_num_nodes == 1)):
                             self._set_current_role('leader')
                             return
 
@@ -429,7 +436,8 @@ class RaftNode(threading.Thread):
 
                     # If there's an election for someone else on a higher term, update your term, vote for them, and demote yourself
                     if (incoming_message.type == MessageType.RequestVotes):
-                        print("got request")
+                        if(self.verbose):
+                            print("got request")
                         if (incoming_message.term >= self.current_term):
                             print("sending vote")
                             self._increment_term(incoming_message.term)
@@ -494,8 +502,8 @@ class RaftNode(threading.Thread):
         self.heard_from = [time.time() for _ in range(self.current_num_nodes)]
 
         # Broadcast an entry to get everyone on the same page
-        entry = {'term': self.current_term, 'entry': 'Leader Entry', 'id': -1}
-        self._broadcast_append_entries(entry)
+        # entry = {'term': self.current_term, 'entry': 'Leader Entry', 'id': -1}
+        # self._broadcast_append_entries(entry)
 
         while ((not self._terminate) and (self.check_role() == 'leader')):
 
@@ -509,10 +517,10 @@ class RaftNode(threading.Thread):
                     #print(self._name + ': max committed index: ' + str(self.commit_index))
 
             # If you haven't heard from a node in a while and it's not up to date, resend the most recent append entries
-            for node, index in enumerate(self.append_next_index):
-                if ((index is not None) and ((time.time() - self.heard_from[node]) > self.resend_time)):
-                    self._send_append_entries(index - 1, self.log[index - 1]['term'], self.log[index], self.all_ids[node])
-                    self.heard_from[node] = time.time()
+            # for node, index in enumerate(self.append_next_index):
+            #     if ((index is not None) and ((time.time() - self.heard_from[node]) > self.resend_time)):
+            #         self._send_pre_append_entries(index - 1, self.log[index - 1]['term'], self.log[index], self.all_ids[node])
+            #         self.heard_from[node] = time.time()
 
             # Watch for messages
             incoming_message = self._get_message()
@@ -646,8 +654,9 @@ class RaftNode(threading.Thread):
                             self._send_vote(incoming_message.sender)
                             self._set_current_role('follower')
 
-                            if(self.verbose):
-                                print(self._name + ': saw higher term, demoting')
+                            # if(self.verbose):
+                            #     print(self._name + ': saw higher term, demoting')
+                            print(self._name + ': saw higher term, demoting')
                             return
             
             # Get any pending client requests
@@ -817,6 +826,7 @@ class RaftNode(threading.Thread):
         '''
         # Append the new entry 
         # If prev_term was specified, might have to cut the log short
+        print("IN BROADCAST PRE-APPEND")
         prev_index = len(self.log) - 1
         
         # Add this to the log
@@ -874,7 +884,8 @@ class RaftNode(threading.Thread):
                 self._send_committal(index, self.all_ids[node])
 
     def _send_request_vote(self, receiver=None):
-        print("REQ VOTE")
+        if(self.verbose):
+            print("REQ VOTE")
         message = RequestVotesMessage(
             type_ =   MessageType.RequestVotes, 
             term =   self.current_term, 
@@ -888,7 +899,8 @@ class RaftNode(threading.Thread):
         self._send_message(message)
 
     def _send_vote(self, candidate, vote_granted=True):
-        print("SEND VOTE: " + str(vote_granted))
+        if(self.verbose):
+            print("SEND VOTE: " + str(vote_granted))
         message = RequestVotesMessage(
             type_ =   MessageType.RequestVotes, 
             term =   self.current_term,
@@ -1093,7 +1105,7 @@ def test_failures():
     # Pause about half of them, including the leader
     l = [n for n in s if (n.check_role() == 'leader')][0]
     l.pause()
-    num_to_kill = int(old_div(total_nodes - 1, 3))
+    num_to_kill = int(old_div(total_nodes, 2)) - 1
     for n in s:
         num_to_kill = num_to_kill - 1
         if num_to_kill == 0:
