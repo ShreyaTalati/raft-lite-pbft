@@ -6,12 +6,10 @@ class MessageType(object):
 	RequestVotes = 0
 	RequestVoteResponse = 1
 	Heartbeat = 2
-	PreAppend = 3
-	PreAppendAcknowledge = 4
-	AppendEntries = 5
-	AppendAcknowledge = 6
-	Committal = 7
-	ClientRequest = 8
+	Acknowledge = 3
+	AppendEntries = 4
+	Committal = 5
+	ClientRequest = 6
 
 class MessageDirection(object):
 	Request = 0
@@ -170,10 +168,8 @@ class RequestVotesMessage(BaseMessage):
 		})
 		return message
 
-# class PreAppendMessage(AppendEntriesMessage):
-
 class AppendEntriesMessage(BaseMessage):
-	def __init__(self, type_=None, term=None, sender=None, receiver=None, direction=None, results=None, leader_id=None, prev_log_index=None, prev_log_term=None, entries=None, leader_commit=None, message=None, pre_append_proof=None, append_proof=None, hash_val=None, self_sign=None):
+	def __init__(self, type_=None, term=None, sender=None, receiver=None, direction=None, results=None, leader_id=None, prev_log_index=None, prev_log_term=None, entries=None, leader_commit=None, message=None):
 		if (message is not None):
 			self.un_jsonify(message)
 		else:
@@ -185,11 +181,6 @@ class AppendEntriesMessage(BaseMessage):
 			self._prev_log_term = prev_log_term
 			self._entries = entries
 			self._leader_commit = leader_commit
-			self._pre_append_proof = pre_append_proof
-			self._append_proof = append_proof
-			self._hash_val = hash_val
-			self._self_sign = self_sign
-
 
 	@property
 	def leader_id(self):
@@ -218,11 +209,6 @@ class AppendEntriesMessage(BaseMessage):
 		self._prev_log_term = 	message['prev_log_term']
 		self._entries = 			message['entries']
 		self._leader_commit = 	message['leader_commit']
-		self._pre_append_proof = message['pre_append_proof']
-		self._append_proof = message['append_proof']
-		self._hash = message['hash_val']
-		self._self_sign = message['self_sign']
-
 
 	def jsonify(self):
 		message = BaseMessage.jsonify(self)
@@ -231,11 +217,7 @@ class AppendEntriesMessage(BaseMessage):
 			'prev_log_index': 	self._prev_log_index,
 			'prev_log_term': 	self._prev_log_term,
 			'entries': 			self._entries,
-			'leader_commit': 	self._leader_commit,
-			'pre_append_proof': self._pre_append_proof,
-			'append_proof':     self._append_proof,
-			'hash_val':         self._hash,
-			'self_sign':        self._self_sign    
+			'leader_commit': 	self._leader_commit
 		})
 		return message
 
